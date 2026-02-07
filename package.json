@@ -1,0 +1,66 @@
+{
+  "name": "llm-expand",
+  "displayName": "LLM Expand",
+  "description": "Context-aware word/phrase expansion by LLM",
+  "version": "0.1.0",
+  "pricing": "Free",
+  "publisher": "DmitryKirsanov",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "images/icon.png",
+  "contributes": {
+    "configuration": {
+      "title": "LLM Expand",
+      "properties": {
+        "LLMExpand.languages": {
+          "type": "array",
+          "default": ["markdown", "plaintext"],
+          "description": "List of language IDs where LLM Expand should be active."
+        },
+        "LLMExpand.maxCompletions": {
+          "type": "integer",
+          "default": 10,
+          "description": "Maximum number of suggestions to return in the completion list."
+        },
+        "LLMExpand.contextSize": {
+          "type": "integer",
+          "default": 100,
+          "description": "Context size to pass to LLM."
+        },
+        "LLMExpand.baseURL": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "OpenAI API base URL."
+        },
+        "LLMExpand.model": {
+          "type": "string",
+          "default": "qwen3-base-4b",
+          "description": "LLM model."
+        },
+        "LLMExpand.depth": {
+          "type": "number",
+          "default": 2,
+          "description": "Depth of suggestions."
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d-kirsanov/vscode-llm-expand.git"
+  },
+  "homepage": "https://github.com/d-kirsanov/vscode-llm-expand",
+  "license": "MIT"
+}

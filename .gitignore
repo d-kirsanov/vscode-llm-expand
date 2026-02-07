@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Compilation Output
+out/
+dist/
+*.tsbuildinfo
+
+# VS Code Extension Specific
+*.vsix
+.vscode-test/
+
+# Local Environment / System Files
+.DS_Store
+Thumbs.db
+npm-debug.log*
+
+# VS Code Workspace (Optional but recommended)
+# We ignore the folder but explicitly "un-ignore" shared config files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

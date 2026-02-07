@@ -1,0 +1,1 @@
+curl http://localhost:11434/api/generate -d "{\"model\": \"gemma3:1b\", \"prompt\": \"i am a \", \"stream\": false, \"raw\": true, \"logprobs\": true, \"top_logprobs\": 10, \"options\": {\"num_predict\": 1} }" > manual-out.json
