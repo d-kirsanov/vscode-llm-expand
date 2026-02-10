@@ -71,76 +71,69 @@ export function activate(ctx: vscode.ExtensionContext) {
 /* ================= PROVIDER ================= */
 
 async function provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.CompletionList> {
-
     const config = vscode.workspace.getConfiguration('LLMExpand');
     const maxCompletions = config.get<number>('maxCompletions') || 10; 
     const contextSize = config.get<number>('contextSize') || 1000; 
     const baseURL = config.get<string>('baseURL') || "http://localhost:11434"; 
     const apiKey = config.get<string>('apiKey'); 
     const model = config.get<string>('model') || "qwen3-base-4b"; 
-    const depth = config.get<number>('depth') || 2; 
+    const depth = config.get<number>('depth') || 4; 
 
     const abortController = new AbortController();
+    token.onCancellationRequested(() => abortController.abort());
 
-    // If VS Code tells us to cancel, abort the fetch
-    token.onCancellationRequested(() => {
-        abortController.abort();
-    });
-
-    const cursorOffset = document.offsetAt(position);
+    // 1. Find the current partial word fragment
+    const wordRange = document.getWordRangeAtPosition(position);
+    const currentPrefix = wordRange ? document.getText(wordRange) : "";
+    
+    // 2. Determine where to split context (at the start of the current word)
+    const promptPosition = wordRange ? wordRange.start : position;
+    const promptOffset = document.offsetAt(promptPosition);
 
     const contextRange = new vscode.Range(
-        document.positionAt(Math.max(0, cursorOffset - contextSize)), 
-        position
+        document.positionAt(Math.max(0, promptOffset - contextSize)), 
+        promptPosition
     );
     const textBefore = document.getText(contextRange);
 
+    // 3. Space Slicing Logic (Applied to the 'clean' context)
     const isSpace = textBefore.length > 0 && textBefore[textBefore.length - 1] === ' ';
-    const context = isSpace? textBefore.slice(0, -1) : textBefore;
+    const context = isSpace ? textBefore.slice(0, -1) : textBefore;
 
-    const suggestions = await getLLMSuggestions(baseURL, model, context, maxCompletions, depth, apiKey);
+    const suggestions = await getLLMSuggestions(baseURL, model, context, maxCompletions * 2, depth, apiKey, abortController.signal);
     
-    // need to dedupe
     const seen = new Set<string>();
-    const items: vscode.CompletionItem[] = []; // build the return list
-
-    //console.log(suggestions)
+    const items: vscode.CompletionItem[] = [];
 
     for (const word of suggestions) {
+        // Space Filtering Logic
+        if (isSpace && /^\p{L}/u.test(word)) continue;
+        if (word.trim().length === 0) continue;
+        if (word.includes("<|endoftext|>") || word.includes("<|im_end|>")) continue;
+
+        // Prefix Filtering
+        // We trim the suggestion to see if it actually completes what the user started typing
+        if (currentPrefix && !word.trim().toLowerCase().startsWith(currentPrefix.toLowerCase())) continue;
+
+        // Filter out completions that don't add anything new (e.g. typing "to" and getting "to")
+        if (word.trim().toLowerCase() === currentPrefix.toLowerCase()) continue;
         
-        if (isSpace) { // if context ends with space (which we stripped), allow only completions that start with non-letter
-            if (/^\p{L}/u.test(word))
-                continue;
-        }
-        if (word.trim().length == 0) // but skip if it's space and nothing else
-            continue;
-
-        if (word.includes("<|endoftext|>") || word.includes("<|im_end|>"))
-            continue
-
-        var word_clean = word.trim();
-        if (/^\s/.test(word) || isSpace)
-            word_clean = ' '+word_clean;
-
-        //console.log(`word_clean |${word_clean}|`)
+        let word_clean = word.trim();
+        if (/^\s/.test(word) || isSpace) word_clean = ' ' + word_clean;
 
         if (!seen.has(word_clean)) {
             seen.add(word_clean);
 
-            // use 'FILE' for a custom icon
             const item = new vscode.CompletionItem(word_clean, vscode.CompletionItemKind.File);
             item.detail = "(LLM)";
             item.sortText = items.length.toString().padStart(5, '0');
 
-            item.range = new vscode.Range(isSpace? document.positionAt(document.offsetAt(position) - 1) : position, position); // Force insertion at cursor
+            // 6. RANGE: Replace the space (if isSpace) + the current fragment
+            const replaceStart = isSpace ? document.positionAt(promptOffset - 1) : promptPosition;
+            item.range = new vscode.Range(replaceStart, position);
 
-            // FIX 2: Set filterText to the current word + the suggestion 
-            // to bypass the strict prefix filtering.
-            const wordRange = document.getWordRangeAtPosition(position);
-            const currentPrefix = wordRange ? document.getText(wordRange) : "";
-            item.filterText = currentPrefix + word;            
-      
-            //console.log(`filtertext |${item.filterText}|`)
+            // Using the full cleaned word for filterText ensures VS Code doesn't hide it
+            item.filterText = word_clean;            
 
             item.command = {
                 command: 'editor.action.triggerSuggest',
@@ -152,14 +145,7 @@ async function provideCompletionItems(document: vscode.TextDocument, position: v
         if (items.length >= maxCompletions) break;
     }
 
-    // if items are empty, return null to let other providers take over
-    if (items.length === 0) {
-        return new vscode.CompletionList([]); // Return empty list on failure
-    }
-
-    //console.log(items);
-    
-    return new vscode.CompletionList(items, true); // mark as complete
+    return items.length === 0 ? new vscode.CompletionList([]) : new vscode.CompletionList(items, true);
 }
 
 /* ================= SEARCH ================= */
@@ -176,7 +162,7 @@ async function getLLMSuggestions(baseURL: string, model: string, textBefore: str
             stream: false, 
             raw: true, 
             logprobs: true, 
-            top_logprobs: maxCompletions, 
+            top_logprobs: Math.min(maxCompletions + 5, 20), // allow some extra items, because some will be filtered, but not exceed 20
             options: { num_predict: 1 } 
         });
 
@@ -224,9 +210,11 @@ async function getLLMSuggestions(baseURL: string, model: string, textBefore: str
         }));
 
         return expandedTokens;
-    } catch (err) {
-        console.error("LLM Expand error: ", err);
-        vscode.window.setStatusBarMessage(`👅 LLM Expand error: ${err}`, 20000);
+    } catch (err: any) {
+        if (!err.toString().contains("abort")) {
+            console.error("LLM Expand error: ", err);
+            vscode.window.setStatusBarMessage(`👅 LLM Expand error: ${err}`, 20000);
+        }
         return [];
     }
 }
